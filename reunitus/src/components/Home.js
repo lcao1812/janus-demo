@@ -8,13 +8,16 @@ class Home extends React.Component {
 		this.joinRoom = this.joinRoom.bind(this);
 		this.handleChangeRoom = this.handleChangeRoom.bind(this);
 		this.handleChangeUser = this.handleChangeUser.bind(this);
-		this.roomids = this.props.rooms.map(r => r.room);
 	}
 
 	joinRoom(event) {
+		let roomids = this.props.rooms.map(r => {
+			return r.room;
+		});
+
 		event.preventDefault();
 		let num = parseInt(this.state.roomid);
-		if (!this.roomids.includes(num)) return alert('Please enter a valid roomid');
+		if (!roomids.includes(num)) return alert('Please enter a valid roomid');
 		this.props.onSubmit(this.state.username, this.state.roomid);
 		this.props.history.push('/room');
 	}

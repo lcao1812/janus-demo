@@ -22,6 +22,7 @@ class App extends React.Component {
       this.setState({roomsList: body});
 		} catch (err) {
 			console.error(err);
+      alert('Could not fetch rooms list');
 		}
 	}
 
