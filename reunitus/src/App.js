@@ -10,8 +10,20 @@ class App extends React.Component {
   constructor(props) {
     super(props);
     this.handleSubmit = this.handleSubmit.bind(this);
-    this.state = {username: '', roomid: ''};
+    this.state = {username: '', roomid: '', roomsList: []};
   }
+
+  async componentDidMount() {
+		try {
+			let result = await fetch('http://localhost:3001/list-rooms', {
+			  method: 'GET'
+			});
+			let body = await result.json();
+      this.setState({roomsList: body});
+		} catch (err) {
+			console.error(err);
+		}
+	}
 
   handleSubmit(username, roomid) {
     this.setState({username, roomid});
@@ -23,8 +35,8 @@ class App extends React.Component {
           <div className="main-container">
             <React.Fragment>
               <Switch>
-                <Route path="/" exact render={(p) => <Home {...p} onSubmit={this.handleSubmit} />} />
-                <Route path="/room" render={(p) => <Room {...p} username={this.state.username} roomid={this.state.roomid} />} />
+                <Route path="/" exact render={(p) => <Home {...p} onSubmit={this.handleSubmit} rooms={this.state.roomsList} />} />
+                <Route path="/room" render={(p) => <Room {...p} username={this.state.username} roomid={this.state.roomid} rooms={this.state.roomsList} />} />
               </Switch>
             </React.Fragment>
           </div>
