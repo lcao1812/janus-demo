@@ -11,21 +11,26 @@ class Room extends React.Component {
 
     constructor(props) {
         super(props);
-
-        let options = {
-            server: server, 
-            onLocalJoin: this.onLocalJoin,
-            onRemoteJoin: this.onRemoteJoin,
-            onRemoteUnjoin: this.onRemoteUnjoin,
-            onError: this.onError
-        };
-        this.roomClient = new RoomClient(options);
         this.state = {
             streams: []
         };
+        this.onLocalJoin = this.onLocalJoin.bind(this);
+        this.onRemoteJoin = this.onRemoteJoin.bind(this);
+        this.onRemoteUnJoin = this.onRemoteUnJoin.bind(this);
+        this.onError = this.onError.bind(this);
     }
 
     async componentDidMount() {
+        let options = {
+            server: server, 
+            publishOwnFeed: true,
+            onLocalJoin: this.onLocalJoin,
+            onRemoteJoin: this.onRemoteJoin,
+            onRemoteUnjoin: this.onRemoteUnJoin,
+            onError: this.onError
+        };
+        this.roomClient = new RoomClient(options);
+
         try {
             await this.roomClient.init();
             this.roomClient.register({
@@ -62,7 +67,7 @@ class Room extends React.Component {
     }
 
     onError(err) {
-        alert(err);
+        console.error(err);
     }
     
     render() {

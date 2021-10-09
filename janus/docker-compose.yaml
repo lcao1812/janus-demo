@@ -1,13 +1,17 @@
-services:
+# https://hub.docker.com/r/qxip/docker-janus
+
+version: '2'
+
+services:      
   janus:
-    build: 
-      context: .
+    container_name: janus
+    image: qxip/docker-janus
     ports:
-      - "8088:8088"
+      - "7889:7889"
+      - "7089:7089"
       - "8089:8089"
       - "7088:7088"
-      - "7089:7089"
-      - "8188:8188"
-      - "8889:8889"
+      - "8088:8088"
       - "8000:8000"
-      - "10000-10300:10000-10300/udp"
+      - "8080:8080"
+      - "10000-10200:10000-10200/udp"
