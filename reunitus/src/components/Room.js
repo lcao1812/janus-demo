@@ -63,19 +63,29 @@ class Room extends React.Component {
                 });
 
                 // **how to listen for joins?**
+                handle.onEvent((e) => {
+                    console.log('event listener:', e);
+                });
 
                 // To publish media to a room, you need to send a publish request, accompanied by a jsep sdp offer
                 // this negotiates a new rtc connection
-                let result = await handle.publishFeed({
-                    room: this.props.roomid,
-                    jsep: jsep
-                })
+                const rtcConn = new RTCPeerConnection();
+                const sdpOffer = await rtcConn.createOffer({
+                    offerToReceiveAudio: true, 
+                    offerToReceiveVideo: true,
+
+                });
+                await rtcConn.setLocalDescription(sdpOffer);
+                const offerPayload = rtcConn.localDescription.sdp;
+
+                // Send to Janus to negotiate a connection
+                let publisherHandle = await videoroom.publishFeed(this.props.roomid, offerPayload);
+                let answerSdp = publisherHandle.getAnswer();
+
+                // Start a connection
 
 
-                // let publisherHandle = await session.videoRoom().publishFeed(roomid, offerSdp);
                 
-                
-
             } catch (err) {
                 console.error(err);
             }
