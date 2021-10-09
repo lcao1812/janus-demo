@@ -36,7 +36,7 @@ class App extends React.Component {
             <React.Fragment>
               <Switch>
                 <Route path="/" exact render={(p) => <Home {...p} onSubmit={this.handleSubmit} rooms={this.state.roomsList} />} />
-                <Route path="/room" render={(p) => <Room {...p} username={this.state.username} roomid={this.state.roomid} rooms={this.state.roomsList} />} />
+                <Route path="/room" render={(p) => <Room {...p} username={this.state.username} roomid={this.state.roomid} />} />
               </Switch>
             </React.Fragment>
           </div>

@@ -37,6 +37,10 @@ class Room extends React.Component {
         }
     }
 
+    componentWillUnmount() {
+        this.roomClient.removeRoom();
+    }
+
     onLocalJoin() {
         console.log('joined the room!');
         // Attach local stream 
