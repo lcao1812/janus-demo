@@ -1,11 +1,17 @@
 import React from 'react';
 import '../App.css';
 
-import RoomClient from 'janus-room';
+// import RoomClient from 'janus-room';
+import {Janus as JanusClient} from 'janus-videoroom-client';
 import {Container, Row, Col} from 'react-bootstrap'
 import RemoteFeed from './RemoteFeed';
 
-const server = "http://localhost:8088/janus";
+const server = "ws://localhost:8188/janus";
+let client = null;
+
+// DOCUMENTATION ON GENERAL VIDEOROOM API
+// https://janus.conf.meetecho.com/docs/videoroom.html
+
 
 class Room extends React.Component {
 
@@ -21,29 +27,77 @@ class Room extends React.Component {
     }
 
     async componentDidMount() {
-        let options = {
-            server: server, 
-            publishOwnFeed: true,
-            onLocalJoin: this.onLocalJoin,
-            onRemoteJoin: this.onRemoteJoin,
-            onRemoteUnjoin: this.onRemoteUnJoin,
-            onError: this.onError
-        };
-        this.roomClient = new RoomClient(options);
+        // Connect to Janus using sockets interface (only used to issue commands)
+        // (see node_modules/janus_videoroom_client/src/client.js)
+        client = new JanusClient({
+            url: server
+        });
 
-        try {
-            await this.roomClient.init();
-            this.roomClient.register({
-                room: parseInt(this.props.roomid), 
-                username: this.props.username
-            });
-        } catch (err) {
+        client.onConnected(async () => {
+            console.log('conencted');
+            try {
+                // Create new session with Janus, first step after connection
+                // (see node_modules/janus_videoroom_client/src/session.js)
+                let session = await client.createSession(); 
+
+                // Object representing videoroom plugin
+                // is used to attach handles to rooms, and get active feeds (publishers) of specified rooms
+                // (see node_modules/.../src/plugins/videoroom/index.js)
+                // (see node_modules/.../src/plugins/plugin.js)
+                let videoroom = await session.videoRoom(); 
+                
+                // Get a session handle for the videoroom plugin
+                // is used for joining a room, leaving a room, muting/unmuting, publishing, receiving events, and others
+                // (see /.../plugins/videoroom/handle.js)
+                let handle = await videoroom.defaultHandle(); 
+
+                // console.log(await handle.list()); // List active rooms
+
+                // Join a room with a publishing handle
+                // results in a response with a list of active publishers (and passive attendees if notify_joining on the room is true)
+                // the user is now able to receive notifs about several aspects of the room, but is still passive (no webrtc connection yet)
+                // is also in the participant list 
+                let result = await handle.joinPublisher({ 
+                    room: this.props.roomid,
+                    display: this.props.username
+                });
+
+                // **how to listen for joins?**
+
+                // To publish media to a room, you need to send a publish request, accompanied by a jsep sdp offer
+                // this negotiates a new rtc connection
+                let result = await handle.publishFeed({
+                    room: this.props.roomid,
+                    jsep: jsep
+                })
+
+
+                // let publisherHandle = await session.videoRoom().publishFeed(roomid, offerSdp);
+                
+                
+
+            } catch (err) {
+                console.error(err);
+            }
+        });
+
+        client.onDisconnected(() => {
+            console.log("disconnected!");
+        });
+
+        client.onError((err) => {
             console.error(err);
-        }
+        });
+
+        client.onEvent(e => {
+            console.log(e);
+        })
+
+        client.connect();
     }
 
     componentWillUnmount() {
-        this.roomClient.removeRoom();
+        // this.roomClient.removeRoom();
     }
 
     onLocalJoin() {
