@@ -9,6 +9,12 @@ import { BrowserRouter as Router, Switch, Route } from 'react-router-dom'
 class App extends React.Component {
   constructor(props) {
     super(props);
+    this.handleSubmit = this.handleSubmit.bind(this);
+    this.state = {username: '', roomid: ''};
+  }
+
+  handleSubmit(username, roomid) {
+    this.setState({username, roomid});
   }
 
   render() {
@@ -17,9 +23,8 @@ class App extends React.Component {
           <div className="main-container">
             <React.Fragment>
               <Switch>
-                <Route path="/" exact component={Home} />
-                <Route path="/room" component={Room} />
-                <Route path="/create-room" component={CreateRoom} />
+                <Route path="/" exact render={(p) => <Home {...p} onSubmit={this.handleSubmit} />} />
+                <Route path="/room" render={(p) => <Room {...p} username={this.state.username} roomid={this.state.roomid} />} />
               </Switch>
             </React.Fragment>
           </div>

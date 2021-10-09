@@ -1,59 +1,66 @@
 import React from 'react';
 import '../App.css';
 import offline from "../images/offline.jpg";
-import { Janus as JanusClient } from 'janus-videoroom-client'
+import RoomClient from 'janus-room';
 import {Container, Row, Col} from 'react-bootstrap'
 
-const server = "ws://localhost:8088/janus";
+const server = "http://localhost:8088/janus";
 
 class Room extends React.Component {
 
     constructor(props) {
         super(props);
-        this.client = new JanusClient({url: server});
-        this.registerEvents();
+
+        let options = {
+            server: server, 
+            onLocalJoin: this.onLocalJoin,
+            onRemoteJoin: this.onRemoteJoin,
+            onRemoteUnjoin: this.onRemoteUnjoin,
+            onError: this.onError,
+        };
+        this.roomClient = new RoomClient(options);
+        this.state = {
+            streams: []
+        };
     }
 
-    componentDidMount() {
-        this.client.connect();
+    async componentDidMount() {
+        await this.roomClient.init();
+        try {
+            this.roomClient.register({
+                room: this.props.roomid, 
+                username: this.props.username
+            });
+        } catch (err) {
+            console.error(err);
+        }
     }
 
-    componentWillUnmount() {
-        this.client.disconnect();
+    onLocalJoin() {
+        console.log('joined the room!');
+        // Attach local stream 
+        let localVideo = document.getElementById('localvideo');
+        this.roomClient.attachStream(localVideo, 0);
     }
 
-    registerEvents() {
-        // On connection
-        this.client.onConnected(async () => {
-            console.log(`Connected to Janus at: ${server}`);
-
-            try {
-                const session = await this.client.createSession();
-                const videoRoomHandle = await session.videoRoom().defaultHandle();
-
-            } catch (err) {
-                console.log(err);
-            } 
-        });
-        
-        // On disconnection
-        this.client.onDisconnected(() => {
-            console.log("Disconnected");
-        });
-
-        // On error
-        this.client.onError((err) => {
-            console.log(err);
-        });
+    onRemoteJoin(streamindex, username, feedid) {
+        console.log(username, `(${streamindex})`, 'joined the room!');
+        // New remote stream, attach to 
     }
 
+    onRemoteUnJoin(streamindex) {
+        console.log(streamindex, 'indexed user left!');
+    }
+
+    onError(err) {
+        console.error(err);
+    }
+    
     render() {
         return (
             <div className="App">
                 <header className="App-header">
-                    <p>
-                        Welcome to your video room!
-                    </p>
+                    <h1>Room: {this.props.roomid} | {this.props.username}</h1>
                     <div>
                         <div id="myvideo" className="container shorter">
                             <video id="localvideo" className="rounded centered" width="100%" height="100%" autoPlay playsInline muted="muted"></video>
