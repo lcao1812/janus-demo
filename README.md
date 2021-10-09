@@ -1,6 +1,6 @@
 # janus-test
 
-A test app for the Janus WebRTC server. Contains a Fedora dockerfile for a Janus container, and a simple express api server. Source code for reunitus react app taken from 
+A test app for the Janus WebRTC server. Contains a Fedora dockerfile for a Janus container, and a simple express api server. In addition, source code for reunitus react app taken from 
 https://github.com/agonza1/reunitus.
 
 ## Setup 
