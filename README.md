@@ -12,8 +12,8 @@ Start the docker image, either with the docker desktop client or the docker cli.
 The react app is hosted on <code>localhost:3000</code>. The express server is hosted on <code>localhost:3001</code>. The Janus container should now be hosted on port <code>8088</code> (see above).
 
 ## Helpful Links
-https://janus.conf.meetecho.com/docs/deploy.html
-https://webrtc.ventures/2020/12/janus-webrtc-media-server-video-conference-app/
-https://janus.conf.meetecho.com/docs/videoroom.html
-https://github.com/meetecho/janus-gateway
-https://janus.conf.meetecho.com/docs/JS.html
+- https://janus.conf.meetecho.com/docs/deploy.html
+- https://webrtc.ventures/2020/12/janus-webrtc-media-server-video-conference-app/
+- https://janus.conf.meetecho.com/docs/videoroom.html
+- https://github.com/meetecho/janus-gateway
+- https://janus.conf.meetecho.com/docs/JS.html
