@@ -10,6 +10,19 @@ class Home extends React.Component {
 		this.handleChangeUser = this.handleChangeUser.bind(this);
 	}
 
+	async componentDidMount() {
+		try {
+			let result = await fetch('http://localhost:3001/list-rooms', {
+			method: 'GET'
+			});
+			let body = await result.json();
+			this.rooms = body;
+			console.log(body);
+		} catch (err) {
+			console.error(err);
+		}
+	}
+
 	joinRoom(event) {
 		event.preventDefault();
 		this.props.onSubmit(this.state.username, this.state.roomid);
