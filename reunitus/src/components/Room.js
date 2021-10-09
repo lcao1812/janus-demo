@@ -1,8 +1,9 @@
 import React from 'react';
 import '../App.css';
-import offline from "../images/offline.jpg";
+
 import RoomClient from 'janus-room';
 import {Container, Row, Col} from 'react-bootstrap'
+import RemoteFeed from './RemoteFeed';
 
 const server = "http://localhost:8088/janus";
 
@@ -16,7 +17,7 @@ class Room extends React.Component {
             onLocalJoin: this.onLocalJoin,
             onRemoteJoin: this.onRemoteJoin,
             onRemoteUnjoin: this.onRemoteUnjoin,
-            onError: this.onError,
+            onError: this.onError
         };
         this.roomClient = new RoomClient(options);
         this.state = {
@@ -25,10 +26,10 @@ class Room extends React.Component {
     }
 
     async componentDidMount() {
-        await this.roomClient.init();
         try {
+            await this.roomClient.init();
             this.roomClient.register({
-                room: this.props.roomid, 
+                room: parseInt(this.props.roomid), 
                 username: this.props.username
             });
         } catch (err) {
@@ -45,15 +46,19 @@ class Room extends React.Component {
 
     onRemoteJoin(streamindex, username, feedid) {
         console.log(username, `(${streamindex})`, 'joined the room!');
-        // New remote stream, attach to 
+        // New remote stream, add to state for render
+        let joined = this.state.streams.concat({streamindex, username, feedid});
+        this.setState({streams: joined});
     }
 
     onRemoteUnJoin(streamindex) {
         console.log(streamindex, 'indexed user left!');
+        let left = this.state.streams.filter((v, i) => i != streamindex);
+        this.setState({streams: left});
     }
 
     onError(err) {
-        console.error(err);
+        alert(err);
     }
     
     render() {
@@ -70,26 +75,22 @@ class Room extends React.Component {
                 </header>
                 <h3 id="title"></h3>
                 <Container>
-                    <Row>
+                    {this.state.streams.map((v, i) => {
+                        if (i > 0) {
+                            const s = v.streamindex; 
+                            const u = v.username;
+                            const f = v.feedid;
+                            return <RemoteFeed key={i} streamindex={s} username={u} feedid={f} client={this.roomClient} />
+                        }
+                    })}
+                    {/* <Row>
                         <Col>
                             <div id="videoremote1" className="container">
                                 <img src={offline} id="img1" className="card-media-image" style={{ width: "300px", height: "250px" }}></img>
                             </div>
                             <h3 id="callername">{'Participant 1'}</h3>
                         </Col>
-                        <Col>
-                            <div id="videoremote2" className="container">
-                                <img src={offline} id="img1" className="card-media-image" style={{ width: "300px", height: "250px" }}></img>
-                            </div>
-                            <h3 id="callername">{'Participant 2'}</h3>
-                        </Col>
-                        <Col>
-                            <div id="videoremote3" className="container">
-                                <img src={offline} id="img1" className="card-media-image" style={{ width: "300px", height: "250px" }}></img>
-                            </div>
-                            <h3 id="callername">{'Participant 3'}</h3>
-                        </Col>
-                    </Row>
+                    </Row> */}
                 </Container>
             </div>
         );
