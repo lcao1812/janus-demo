@@ -180,6 +180,7 @@ class Room extends React.Component {
         if (jsep) {
             // --- STEP 5 --- 
             // Janus sent us an SDP answer for our publish request
+            // begin sending local audio and video
             vrHandle.handleRemoteJsep({jsep});
             // Check if any media we wanted to publish has been rejected
             let audio = msg["audio_codec"];
@@ -226,13 +227,17 @@ class Room extends React.Component {
 
     // Attach and create a new handle for a remote stream
     // NOTE: contains custom callbacks, used for each new remote stream
+    // also note that there is one less step here bc we are reusing the 
+    // connection already created above
     newRemoteFeed(id, display, audiocodec, videocodec) {
         // Attach to the videoroom plugin to get subscriber handle
         let remoteFeed = null;
+        // --- Subscriber step 1 ---
         janus.attach({
             plugin: 'janus.plugin.videoroom',
             opaqueId,
             success: subHandle => {
+                // --- Subscriber step 2 ---
                 remoteFeed = subHandle;
                 console.log('--- NEW SUBSCRIBE HANDLE ---');
                 console.log(`Attached to ${remoteFeed.getPlugin()} | feedid=${id}`);
@@ -240,7 +245,7 @@ class Room extends React.Component {
                 // Join the correct room and sub to the feed; initiate RTC negotations
                 let subRequest = {
                     request: 'join',
-                    room: this.props.roomid,
+                    room: parseInt(this.props.roomid),
                     ptype: 'subscriber',
                     feed: id,
                     private_id: mypvtid
@@ -261,6 +266,7 @@ class Room extends React.Component {
                     }
                 } 
                 if (jsep) {
+                    // --- Subscriber step 3 ---
                     // Janus has sent us a subscriber SDP offer (compared to answer, which we got when trying to publish)
                     remoteFeed.createAnswer({
                         jsep,
@@ -278,6 +284,7 @@ class Room extends React.Component {
                 }
             },
             onremotestream: (stream) => {
+                // --- Subscriber step 4 ---
                 console.log('REMOTE STREAM:', stream);
                 // We have received the stream requested, catalog it and do UI housekeeping
                 const newObj = {id, display, stream};
@@ -305,20 +312,11 @@ class Room extends React.Component {
                         <div id="myvideo" className="container shorter">
                             <video id="localvideo" className="rounded centered" width="100%" height="100%" autoPlay playsInline muted="muted"></video>
                         </div>
-                        {/*<div className="panel-body" id="videolocal"></div>*/}
                     </div>
                 </header>
                 <h3 id="title"></h3>
                 <Container>
                     {this.state.remoteStreamObjs.map((v, i) => <RemoteFeed key={i} {...v} />)}
-                    {/* <Row>
-                        <Col>
-                            <div id="videoremote1" className="container">
-                                <img src={offline} id="img1" className="card-media-image" style={{ width: "300px", height: "250px" }}></img>
-                            </div>
-                            <h3 id="callername">{'Participant 1'}</h3>
-                        </Col>
-                    </Row> */}
                 </Container>
             </div>
         );
