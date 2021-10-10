@@ -284,8 +284,13 @@ class Room extends React.Component {
             },
             onremotestream: (stream) => {
                 // --- Subscriber step 4 ---
-                console.log('REMOTE STREAM:', stream);
+                const videoTrack = stream.getVideoTracks();
+                const audioTrack = stream.getAudioTracks();
+                if (!videoTrack || videoTrack.length == 0) console.error('No video tracks for sub:', id);
+                if (!audioTrack || audioTrack.length == 0) console.error('No audio tracks for sub:', id);
+
                 // We have received the stream requested, catalog it and do UI housekeeping
+                if (this.state.remoteStreamObjs.filter(o => o.id == id).length != 0) return;
                 const newObj = {id, display, stream};
                 let concat = this.state.remoteStreamObjs.concat(newObj);
                 this.setState({remoteStreamObjs: concat});

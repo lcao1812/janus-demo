@@ -1,5 +1,6 @@
 import React from 'react';
 import {Row} from 'react-bootstrap';
+import './RemoteFeed.css';
 
 class RemoteFeed extends React.Component {
     componentDidMount() {
@@ -14,7 +15,7 @@ class RemoteFeed extends React.Component {
                 <div className="container">
                     <video id={this.props.id} className="rounded centered" width="300px" height="250px" autoPlay playsInline></video>
                 </div>
-                <h3>{this.props.display}</h3>
+                <h3 className="centered-h3">{this.props.display}</h3>
             </Row>
         );
     }
