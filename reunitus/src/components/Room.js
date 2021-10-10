@@ -1,7 +1,6 @@
 import React from 'react';
 import '../App.css';
 
-// import RoomClient from 'janus-room';
 import {Container, Row, Col} from 'react-bootstrap'
 import RemoteFeed from './RemoteFeed';
 import Janus from './Janus.js';
@@ -20,7 +19,7 @@ let myid, mypvtid = null;
 
 // NOTE: due to the nature of the Janus JS API, publisher code is orgnized in 
 // this file in several top level functions, while subscriber handle code is within its
-// own function newRemoteFeed(), invoked for every new subscription
+// own function newRemoteFeed(), invoked for every new subscription to a remote publisher
 
 class Room extends React.Component {
 
