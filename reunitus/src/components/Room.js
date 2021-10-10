@@ -2,16 +2,19 @@ import React from 'react';
 import '../App.css';
 
 // import RoomClient from 'janus-room';
-import {Janus as JanusClient} from 'janus-videoroom-client';
 import {Container, Row, Col} from 'react-bootstrap'
 import RemoteFeed from './RemoteFeed';
+import Janus from './Janus.js';
 
 const server = "ws://localhost:8188/janus";
-let client = null;
+let janus = null; // The main object for interaction with Janus
+let vrHandle = null; // The main object for interaction with VideoRoom plugin
 
 // DOCUMENTATION ON GENERAL VIDEOROOM API
 // https://janus.conf.meetecho.com/docs/videoroom.html
 
+// NOTE: due to the nature of the Janus JS API, code is orgnized in 
+// this file in several top level functions
 
 class Room extends React.Component {
 
@@ -20,94 +23,114 @@ class Room extends React.Component {
         this.state = {
             streams: []
         };
+
+        this.createSession = this.createSession.bind(this);
+        this.attachToVideoRoomPlugin = this.attachToVideoRoomPlugin.bind(this);
+        this.negotiateRTCConnection = this.negotiateRTCConnection.bind(this);
+        this.sendSDPOffer = this.sendSDPOffer.bind(this);
+        this.onMediaDialog = this.onMediaDialog.bind(this);
+        this.onRtcStateChange = this.onRtcStateChange.bind(this);
+        this.onMessage = this.onMessage.bind(this);
+        this.onLocalTrack = this.onLocalTrack.bind(this);
+        this.onRemoteTrack = this.onRemoteTrack.bind(this);
+        this.onCleanUp = this.onCleanUp.bind(this);
+        this.onJanusDestroyed = this.onJanusDestroyed.bind(this);
+
         this.onLocalJoin = this.onLocalJoin.bind(this);
         this.onRemoteJoin = this.onRemoteJoin.bind(this);
         this.onRemoteUnJoin = this.onRemoteUnJoin.bind(this);
         this.onError = this.onError.bind(this);
     }
 
+    // STEP 0
     async componentDidMount() {
-        // Connect to Janus using sockets interface (only used to issue commands)
-        // (see node_modules/janus_videoroom_client/src/client.js)
-        client = new JanusClient({
-            url: server
-        });
-
-        client.onConnected(async () => {
-            console.log('conencted');
-            try {
-                // Create new session with Janus, first step after connection
-                // (see node_modules/janus_videoroom_client/src/session.js)
-                let session = await client.createSession(); 
-
-                // Object representing videoroom plugin
-                // is used to attach handles to rooms, and get active feeds (publishers) of specified rooms
-                // (see node_modules/.../src/plugins/videoroom/index.js)
-                // (see node_modules/.../src/plugins/plugin.js)
-                let videoroom = await session.videoRoom(); 
-                
-                // Get a session handle for the videoroom plugin
-                // is used for joining a room, leaving a room, muting/unmuting, publishing, receiving events, and others
-                // (see /.../plugins/videoroom/handle.js)
-                let handle = await videoroom.defaultHandle(); 
-
-                // console.log(await handle.list()); // List active rooms
-
-                // Join a room with a publishing handle
-                // results in a response with a list of active publishers (and passive attendees if notify_joining on the room is true)
-                // the user is now able to receive notifs about several aspects of the room, but is still passive (no webrtc connection yet)
-                // is also in the participant list 
-                let result = await handle.joinPublisher({ 
-                    room: this.props.roomid,
-                    display: this.props.username
-                });
-
-                // **how to listen for joins?**
-                handle.onEvent((e) => {
-                    console.log('event listener:', e);
-                });
-
-                // To publish media to a room, you need to send a publish request, accompanied by a jsep sdp offer
-                // this negotiates a new rtc connection
-                const rtcConn = new RTCPeerConnection();
-                const sdpOffer = await rtcConn.createOffer({
-                    offerToReceiveAudio: true, 
-                    offerToReceiveVideo: true,
-
-                });
-                await rtcConn.setLocalDescription(sdpOffer);
-                const offerPayload = rtcConn.localDescription.sdp;
-
-                // Send to Janus to negotiate a connection
-                let publisherHandle = await videoroom.publishFeed(this.props.roomid, offerPayload);
-                let answerSdp = publisherHandle.getAnswer();
-
-                // Start a connection
-
-
-                
-            } catch (err) {
-                console.error(err);
-            }
-        });
-
-        client.onDisconnected(() => {
-            console.log("disconnected!");
-        });
-
-        client.onError((err) => {
-            console.error(err);
-        });
-
-        client.onEvent(e => {
-            console.log(e);
-        })
-
-        client.connect();
+        // Initialize the client library 
+        Janus.init({
+            debug: true, 
+            dependencies: Janus.UseDefaultDependencies(),
+            callback: this.createSession});
     }
 
     componentWillUnmount() {
         // this.roomClient.removeRoom();
+    }
+
+    // STEP 1
+    createSession() {
+        // Create a session with Janus 
+        janus = new Janus({
+            server, 
+            success: this.attachToVideoRoomPlugin,
+            error: this.onError,
+            destroyed: this.onJanusDestroyed
+        });
+    }
+
+    // STEP 2
+    attachToVideoRoomPlugin() {
+        console.log('CONNECTED to Janus at:', janus.getServer());
+
+        // Attach to Janus VideoRoom plugin 
+        janus.attach({
+            plugin: 'janus.plugin.videoroom',
+            success: this.negotiateRTCConnection,
+            error: this.onError, 
+            consentDialog: this.onMediaDialog, 
+            webrtcState: this.onRtcStateChange,
+            onMessage: this.onMessage, 
+            onlocaltrack: this.onLocalTrack,
+            oncleanup: this.onCleanUp
+        });
+    }
+
+    // STEP 3
+    negotiateRTCConnection(handle) {
+        vrHandle = handle;
+        console.log('ATTACHED handle to', handle.getPlugin());
+
+        // Create WebRTC compliant offer
+        vrHandle.createOffer({
+            success: this.sendSDPOffer,
+            error: this.onError
+        });
+    }
+
+    // STEP 4
+    sendSDPOffer(jsep) {
+        let body = {"audio": true, "video": true};
+        vrHandle.send({"message": body, "jsep": jsep});
+    }
+
+    onMediaDialog() {
+        console.log('Acquiring user media...');
+    }
+
+    // Called with true when peer connection is ready, false when it goes down
+    onRtcStateChange(state) {
+
+    }
+
+    // Called when Janus sends a message or event (or used for rtc negotation)
+    onMessage(msg, jsep) {
+        if (jsep !== undefined && jsep !== null) {
+            // Handle rtc negotation answer
+            vrHandle.handleRemoteJsep({jsep});
+        }
+    }
+
+    // Called when local media stream is available for display
+    onLocalTrack(track, added) {
+
+    }
+
+    // Called when remote media stream is avilable for display
+    onRemoteTrack(track, mid, added) {
+
+    }
+
+    // Called when the rtc connection was closed with Janus
+    onCleanUp() {
+
     }
 
     onLocalJoin() {
@@ -132,6 +155,10 @@ class Room extends React.Component {
 
     onError(err) {
         console.error(err);
+    }
+
+    onJanusDestroyed() {
+        console.log('Janus has been destroyed');
     }
     
     render() {
