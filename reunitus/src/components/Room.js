@@ -7,8 +7,10 @@ import RemoteFeed from './RemoteFeed';
 import Janus from './Janus.js';
 
 const server = "ws://localhost:8188/janus";
+const opaqueId = Janus.randomString();
 let janus = null; // The main object for interaction with Janus
 let vrHandle = null; // The main object for interaction with VideoRoom plugin
+let myid, mypvtid = null;
 
 // DOCUMENTATION ON GENERAL VIDEOROOM API
 // https://janus.conf.meetecho.com/docs/videoroom.html
@@ -16,15 +18,16 @@ let vrHandle = null; // The main object for interaction with VideoRoom plugin
 // EXAMPLE APP USING JS API
 // https://github.com/Deanfost/janus-test/blob/main/reunitus/src/components/Room.js
 
-// NOTE: due to the nature of the Janus JS API, code is orgnized in 
-// this file in several top level functions
+// NOTE: due to the nature of the Janus JS API, publisher code is orgnized in 
+// this file in several top level functions, while subscriber handle code is within its
+// own function newRemoteFeed(), invoked for every new subscription
 
 class Room extends React.Component {
 
     constructor(props) {
         super(props);
         this.state = {
-            remoteStreams: [],
+            remoteStreamObjs: [],
             myStream: null
         };
 
@@ -35,9 +38,9 @@ class Room extends React.Component {
         this.onRtcStateChange = this.onRtcStateChange.bind(this);
         this.onPublisherMessage = this.onPublisherMessage.bind(this);
         this.onLocalStream = this.onLocalStream.bind(this);
-        this.onRemoteStream = this.onRemoteStream.bind(this);
         this.onCleanUp = this.onCleanUp.bind(this);
         this.onJanusDestroyed = this.onJanusDestroyed.bind(this);
+        this.newRemoteFeed = this.newRemoteFeed.bind(this);
         this.onError = this.onError.bind(this);
     }
 
@@ -72,6 +75,7 @@ class Room extends React.Component {
         // Attach to Janus VideoRoom plugin to get publishing handle
         janus.attach({
             plugin: 'janus.plugin.videoroom',
+            opaqueId,
             success: this.onPublisherAttachment,
             error: this.onError, 
             consentDialog: this.onMediaDialog, 
@@ -90,7 +94,7 @@ class Room extends React.Component {
         // Prepare username registration
         const register = {
             "request": "join", 
-            "room": this.props.roomid,
+            "room": parseInt(this.props.roomid),
             "ptype": "publisher", 
             "display": this.props.username
         };
@@ -112,14 +116,18 @@ class Room extends React.Component {
     // (and used for rtc negotation)
     onPublisherMessage(msg, jsep) {
         let event = msg['videoroom'];
-        if (event !== undefined && event !== null ) {
+        if (event) {
             if (event === 'joined') {
-                console.log('JOINED room!');
+                // --- STEP 4 ---
+                // Publisher/manager created, negotiate WebRTC and attach to existing feeds if any
+                myid = msg['id'];
+                mypvtid = msg['private_id'];
+                console.log(`JOINED room ${msg['room']} with id ${myid}`);
+                
                 // Create WebRTC compliant offer for publishing own feed
                 vrHandle.createOffer({
                     media: { audioRecv: false, videoRecv: false, audioSend: true, videoSend: true },
-                    success: function (jsep) {
-                        // --- STEP 4 ---
+                    success: (jsep) => {
                         // Got publisher SDP response, send publish request with jsep
                         console.log('RECEIVED publisher SDP response');
                         const publish = { "request": "configure", "audio": true, "video": true };
@@ -128,11 +136,51 @@ class Room extends React.Component {
                     },
                     error: this.onError
                 });
+
+                // Can we attach to any existing feeds?
+                let publishers = msg['publishers'];
+                if (publishers) {
+                    console.log(`RECEIVED a list of ${publishers.length} active publishers in the room:`);
+                    publishers.forEach(publisher => {
+                        // Attach to the feeds
+                        let id = publisher['id'];
+                        let displayName = publisher['display'];
+                        let audio = publisher['audio_codec'];
+                        let video = publisher['video_codec'];
+                        console.log(`Id: ${id} username: ${displayName} audiocodec: ${audio} videocodec: ${video}`);   
+                        this.newRemoteFeed(id, displayName, audio, video);
+                    });
+                }
+            } else if(event === 'destroyed') {
+                console.error("The room has been destroyed");
+            } else if (event === 'event') {
+                if (msg["publishers"]) {
+                    // Attach to new feed(s)
+                    console.log('New publishers!')
+                    let publishers = msg["publishers"];
+                    publishers.forEach(publisher => {
+                        // Attach to the feeds
+                        let id = publisher['id'];
+                        let displayName = publisher['display'];
+                        let audio = publisher['audio_codec'];
+                        let video = publisher['video_codec'];
+                        console.log(`Id: ${id} username: ${displayName} audiocodec: ${audio} videocodec: ${video}`);   
+                        this.newRemoteFeed(id, displayName, audio, video);
+                    });
+                } else if(msg['leaving']) {
+                    // One of the publishers is leaving
+                    console.log('A publisher is leaving!');
+                } else if (msg['unpublished']) {
+                    // One of the publishers has unpublished
+                    let leftPublisher = msg['unpublished'];
+                    console.log(`Publisher left: ${leftPublisher}`);
+                }
             }
         }
-        if (jsep !== undefined && jsep !== null) {
-            // --- STEP 5 --- Handle publish answer
-            vrHandle.handleRemoteJsep({jsep}); // NOTE: See onRemoteStream()
+        if (jsep) {
+            // --- STEP 5 --- 
+            // Janus sent us an SDP answer for our publish request
+            vrHandle.handleRemoteJsep({jsep});
             // Check if any media we wanted to publish has been rejected
             let audio = msg["audio_codec"];
             let myStream = this.state.myStream;
@@ -158,24 +206,91 @@ class Room extends React.Component {
         this.setState({myStream: stream});
     }
 
-    // Called when remote media stream is avilable for display
-    // this is ONLY used in subscribing handles, invoked AFTER vrHandle.handleRemoteJsep()
-    onRemoteStream(stream) {
-
-    }
-
     // Called when the rtc connection was closed with Janus
+    // (but handle is still active)
     onCleanUp() {
         console.log('RTC connection closed with Janus');
         this.setState({myStream: null});
     }
 
+    // Generic error handler for several points
+    // here it is only used for the publishing handle
     onError(err) {
         console.error(err);
     }
 
+    // Called when the janus connection has been destroyed
     onJanusDestroyed() {
         console.log('Janus has been destroyed');
+    }
+
+    // Attach and create a new handle for a remote stream
+    // NOTE: contains custom callbacks, used for each new remote stream
+    newRemoteFeed(id, display, audiocodec, videocodec) {
+        // Attach to the videoroom plugin to get subscriber handle
+        let remoteFeed = null;
+        janus.attach({
+            plugin: 'janus.plugin.videoroom',
+            opaqueId,
+            success: subHandle => {
+                remoteFeed = subHandle;
+                console.log('--- NEW SUBSCRIBE HANDLE ---');
+                console.log(`Attached to ${remoteFeed.getPlugin()} | feedid=${id}`);
+                console.log('--- NEW SUBSCRIBE HANDLE ---');
+                // Join the correct room and sub to the feed; initiate RTC negotations
+                let subRequest = {
+                    request: 'join',
+                    room: this.props.roomid,
+                    ptype: 'subscriber',
+                    feed: id,
+                    private_id: mypvtid
+                };
+                remoteFeed.videoCodec = videocodec;
+                remoteFeed.audioCodec = audiocodec;
+                remoteFeed.send({message: subRequest});
+            },
+            error: (err) => {
+                console.error('Could not attach subscriber handle:', err);
+            },
+            onmessage: (msg, jsep) => {
+                let event = msg['videoroom'];
+                if (event) {
+                    if (event === 'attached') {
+                        console.log(`Subscriber ${id} created and attached!`);
+                        // Subscriber attached, we have received a list of streams from the publisher
+                    }
+                } 
+                if (jsep) {
+                    // Janus has sent us a subscriber SDP offer (compared to answer, which we got when trying to publish)
+                    remoteFeed.createAnswer({
+                        jsep,
+                        media: { audioSend: false, videoSend: false }, // We only want to receive audio / video 
+                        success: jsep => {
+                            // Answer with jsep, and request for the stream to start
+                            console.log(`SDP received for subscriber ${id}`);
+                            let body = { request: 'start', room: this.props.roomid };
+                            remoteFeed.send({message: body, jsep});
+                        },
+                        error: err => {
+                            console.error('Could not establish subscriber connection:', err);
+                        }
+                    })
+                }
+            },
+            onremotestream: (stream) => {
+                console.log('REMOTE STREAM:', stream);
+                // We have received the stream requested, catalog it and do UI housekeeping
+                const newObj = {id, display, stream};
+                let concat = this.state.remoteStreamObjs.concat(newObj);
+                this.setState({remoteStreamObjs: concat});
+            },
+            oncleanup: () => {
+                // The rtc sub connection has been closed
+                console.log(`Subscription connection closed! id: ${id}, display: ${display}`);
+                const newList = this.state.remoteStreamObjs.filter(o => o.id != id);
+                this.setState({remoteStreamObjs: newList});
+            }
+        });
     }
     
     render() {
@@ -195,14 +310,7 @@ class Room extends React.Component {
                 </header>
                 <h3 id="title"></h3>
                 <Container>
-                    {this.state.remoteStreams.map((v, i) => {
-                        if (i > 0) {
-                            const s = v.streamindex; 
-                            const u = v.username;
-                            const f = v.feedid;
-                            return <RemoteFeed key={i} streamindex={s} username={u} feedid={f} client={this.roomClient} />
-                        }
-                    })}
+                    {this.state.remoteStreamObjs.map((v, i) => <RemoteFeed key={i} {...v} />)}
                     {/* <Row>
                         <Col>
                             <div id="videoremote1" className="container">
