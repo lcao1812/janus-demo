@@ -73,7 +73,7 @@ app.post('/create-room/:roomID', async function (req, res, next) {
 	}
 });
 
-app.post('/destroy-room/:roomID', async function (req, res, next) {
+app.delete('/destroy-room/:roomID', async function (req, res, next) {
 	// Create new room
 	let { roomID } = req.params;
 	roomID = parseInt(roomID);
