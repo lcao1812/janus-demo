@@ -3,6 +3,8 @@
 A test app for the Janus WebRTC server. Contains a Fedora dockerfile for a Janus container, and a simple express api server. In addition, original source code for reunitus react app taken from 
 https://github.com/agonza1/reunitus.
 
+The purpose of this project is to serve as a proof of concept for how communication works with clients between Janus and clients, and how a server might make a call to Janus using the barebones HTTP API.
+
 ## Setup 
 Run <code>npm install</code> in the reunitus and express projects.
 
