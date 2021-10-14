@@ -1,365 +1,326 @@
 import React from 'react';
-
 import '../App.css';
-import offline from "../images/offline.jpg";
-import Janus from './Janus';
-import $ from 'jquery';
-import {Container, Row, Col} from 'react-bootstrap'
 
-const server = "http://localhost:8088/janus";
-// server = process.env.REACT_APP_JANUS_URL;
-let janusRoom = null;
-let vroomHandle = null;
-let myroom = 1234;
-let opaqueId = "videoroom-"+Janus.randomString(12);
-let mypvtid = null;
-let myusername = null;
-let feeds = [];
-let myid = null;
-let mystream = null;
+import {Container, Row, Col} from 'react-bootstrap'
+import RemoteFeed from './RemoteFeed';
+import Janus from './Janus.js';
+
+const server = "ws://localhost:8188/janus";
+const opaqueId = Janus.randomString();
+let janus = null; // The main object for interaction with Janus
+let vrHandle = null; // The main object for interaction with VideoRoom plugin
+let myid, mypvtid = null;
+
+// DOCUMENTATION ON GENERAL VIDEOROOM API
+// https://janus.conf.meetecho.com/docs/videoroom.html
+
+// EXAMPLE APP USING JS API
+// https://github.com/Deanfost/janus-test/blob/main/reunitus/src/components/Room.js
+
+// NOTE: due to the nature of the Janus JS API, publisher code is orgnized in 
+// this file in several top level functions, while subscriber handle code is within its
+// own function newRemoteFeed(), invoked for every new subscription to a remote publisher
 
 class Room extends React.Component {
 
     constructor(props) {
         super(props);
+        this.state = {
+            remoteStreamObjs: [],
+            myStream: null
+        };
+
+        this.createSession = this.createSession.bind(this);
+        this.attachToVideoRoomPlugin = this.attachToVideoRoomPlugin.bind(this);
+        this.onPublisherAttachment = this.onPublisherAttachment.bind(this);
+        this.onMediaDialog = this.onMediaDialog.bind(this);
+        this.onRtcStateChange = this.onRtcStateChange.bind(this);
+        this.onPublisherMessage = this.onPublisherMessage.bind(this);
+        this.onLocalStream = this.onLocalStream.bind(this);
+        this.onCleanUp = this.onCleanUp.bind(this);
+        this.onJanusDestroyed = this.onJanusDestroyed.bind(this);
+        this.newRemoteFeed = this.newRemoteFeed.bind(this);
+        this.onError = this.onError.bind(this);
     }
 
-    componentDidMount() {
-        this.startJanusServerRoom();
+    // --- STEP 0 ---
+    async componentDidMount() {
+        // Initialize the client library 
+        Janus.init({
+            debug: true, 
+            dependencies: Janus.UseDefaultDependencies(),
+            callback: this.createSession});
     }
 
-    startJanusServerRoom(){
-        function publishOwnFeed(useAudio) {
-            // Publish our stream
-            vroomHandle.createOffer(
-                {
-                    media: { audioRecv: false, videoRecv: false, audioSend: useAudio, videoSend: true },	// Publishers are sendonly
-                    success: function(jsep) {
-                        Janus.debug("Got publisher SDP!");
-                        Janus.debug(jsep);
-                        const publish = { "request": "configure", "audio": useAudio, "video": true };
-                        vroomHandle.send({"message": publish, "jsep": jsep});
+    componentWillUnmount() {
+        if (janus) janus.destroy();
+    }
+
+    // --- STEP 1 ---
+    createSession() {
+        // Create a session with Janus 
+        janus = new Janus({
+            server, 
+            success: this.attachToVideoRoomPlugin,
+            error: this.onError,
+            destroyed: this.onJanusDestroyed
+        });
+    }
+
+    // --- STEP 2 ---
+    attachToVideoRoomPlugin() {
+        console.log('CONNECTED to Janus at:', janus.getServer());
+
+        // Attach to Janus VideoRoom plugin to get publishing handle
+        janus.attach({
+            plugin: 'janus.plugin.videoroom',
+            opaqueId,
+            success: this.onPublisherAttachment,
+            error: this.onError, 
+            consentDialog: this.onMediaDialog, 
+            webrtcState: this.onRtcStateChange,
+            onmessage: this.onPublisherMessage, 
+            onlocalstream: this.onLocalStream,
+            oncleanup: this.onCleanUp
+        });
+    }
+
+    // --- STEP 3 ---
+    // See onPublisherAttachment() for step 4
+    onPublisherAttachment(handle) {
+        vrHandle = handle;
+        console.log('ATTACHED handle to', handle.getPlugin());
+        // Prepare username registration
+        const register = {
+            "request": "join", 
+            "room": parseInt(this.props.roomid),
+            "ptype": "publisher", 
+            "display": this.props.username
+        };
+        vrHandle.send({"message": register});
+    }
+    // TODO: YOU NEED TWO VERSIONS OF JANUS.ATTACH(), ONE FOR INITIAL HANDLE, ONE FOR EACH NEW REMOTE FEED
+    // TODO: ALSO NEED ONMESSAGE FOR THE SAME REASON, CHECK THE FUNCTION newRemoteFeed() in the github
+
+    onMediaDialog() {
+        console.log('Acquiring user media...');
+    }
+
+    // Called with true when peer connection is ready, false when it goes down
+    onRtcStateChange(state) {
+        console.log('RTC state change', state);
+    }
+
+    // Called when Janus sends a message or event to the PUBLISHER handle 
+    // (and used for rtc negotation)
+    onPublisherMessage(msg, jsep) {
+        let event = msg['videoroom'];
+        if (event) {
+            if (event === 'joined') {
+                // --- STEP 4 ---
+                // Publisher/manager created, negotiate WebRTC and attach to existing feeds if any
+                myid = msg['id'];
+                mypvtid = msg['private_id'];
+                console.log(`JOINED room ${msg['room']} with id ${myid}`);
+                
+                // Create WebRTC compliant offer for publishing own feed
+                vrHandle.createOffer({
+                    media: { audioRecv: false, videoRecv: false, audioSend: true, videoSend: true },
+                    success: (jsep) => {
+                        // Got publisher SDP response, send publish request with jsep
+                        console.log('RECEIVED publisher SDP response');
+                        const publish = { "request": "configure", "audio": true, "video": true };
+                        vrHandle.send({"message": publish, "jsep": jsep});
+                        // See jsep if statement at bottom for step 5
                     },
-                    error: function(error) {
-                        Janus.error("WebRTC error:", error);
-                        if (useAudio) {
-                            publishOwnFeed(false);
-                        }
-                    }
+                    error: this.onError
                 });
-        }
 
-        function newRemoteFeed(id, display, audio, video) {
-            // A new feed has been published, create a new plugin handle and attach to it as a subscriber
-            let remoteFeed = null;
-            janusRoom.attach(
-                {
-                    plugin: "janus.plugin.videoroom",
-                    opaqueId: opaqueId,
-                    success: function(pluginHandle) {
-                        remoteFeed = pluginHandle;
-                        console.log("Plugin attached! (" + remoteFeed.getPlugin() + ", id=" + remoteFeed.getId() + ")");
-                        console.log("  -- This is a subscriber");
-                        // We wait for the plugin to send us an offer
-                        let subscribe = {
-                            request: "join",
-                            room: myroom,
-                            ptype: "subscriber",
-                            feed: id,
-                            private_id: mypvtid
-                        };
-                        remoteFeed.videoCodec = video;
-                        remoteFeed.send({ message: subscribe });
-                    },
-                    error: function(error) {
-                        Janus.error("  -- Error attaching plugin...", error);
-                    },
-                    onmessage: function(msg, jsep) {
-                        Janus.debug(" ::: Got a message (subscriber) :::", msg);
-                        let event = msg["videoroom"];
-                        console.log("Event: " + event);
-                        if(event) {
-                            if(event === "attached") {
-                                console.log(`subscriber created and attached!`);
-                                // Subscriber created and attached
-                                for(let i=1;i<6;i++) {
-                                    if(!feeds[i]) {
-                                        feeds[i] = remoteFeed;
-                                        remoteFeed.rfindex = i;
-                                        break;
-                                    }
-                                }
-                                remoteFeed.rfid = msg["id"];
-                                remoteFeed.rfdisplay = msg["display"];
-                                console.log(`attached`, remoteFeed)
-                                Janus.log("Successfully attached to feed " + remoteFeed.rfid + " (" + remoteFeed.rfdisplay + ") in room " + msg["room"]);
-                                $('#remote'+remoteFeed.rfindex).removeClass('hide').html(remoteFeed.rfdisplay).show();
-                            }
-                        }
-                        if(jsep) {
-                            Janus.debug("Handling SDP as well...", jsep);
-                            // Answer and attach
-                            remoteFeed.createAnswer(
-                                {
-                                    jsep: jsep,
-                                    // Add data:true here if you want to subscribe to datachannels as well
-                                    // (obviously only works if the publisher offered them in the first place)
-                                    media: { audioSend: false, videoSend: false },	// We want recvonly audio/video
-                                    success: function(jsep) {
-                                        console.log("Got SDP!", jsep);
-                                        let body = { request: "start", room: myroom };
-                                        remoteFeed.send({ message: body, jsep: jsep });
-                                    },
-                                    error: function(error) {
-                                        console.error("WebRTC error:", error);
-                                    }
-                                });
-                        }
-                    },
-                    iceState: function(state) {
-                        Janus.log("ICE state of this WebRTC PeerConnection (feed #" + remoteFeed.rfindex + ") changed to " + state);
-                    },
-                    webrtcState: function(on) {
-                        Janus.log("Janus says this WebRTC PeerConnection (feed #" + remoteFeed.rfindex + ") is " + (on ? "up" : "down") + " now");
-                    },
-                    onlocalstream: function(stream) {
-                        // The subscriber stream is recvonly, we don't expect anything here
-                    },
-                    onremotestream: function(stream) {
-                        console.log("Remote feed #" + remoteFeed.rfindex + ", stream:", stream);
-                        let addButtons = false;
-                        if($('#remotevideo'+remoteFeed.rfindex).length === 0) {
-                            // No remote video yet
-                            $('#videoremote'+remoteFeed.rfindex).children('img').remove();
-                            $('#videoremote'+remoteFeed.rfindex).append('<video class="rounded centered" id="waitingvideo' + remoteFeed.rfindex + '" width="100%" height="100%" />');
-                            $('#videoremote'+remoteFeed.rfindex).append('<video class="rounded centered relative hide" id="remotevideo' + remoteFeed.rfindex + '" width="100%" height="100%" autoplay playsinline/>');
-                            // Show the video, hide the spinner and show the resolution when we get a playing event
-                            $("#remotevideo"+remoteFeed.rfindex).bind("playing", function () {
-                                if(remoteFeed.spinner)
-                                    remoteFeed.spinner.stop();
-                                remoteFeed.spinner = null;
-                                $('#waitingvideo'+remoteFeed.rfindex).remove();
-                                if(this.videoWidth)
-                                    $('#remotevideo'+remoteFeed.rfindex).removeClass('hide').show();
-                                if(Janus.webRTCAdapter.browserDetails.browser === "firefox") {
-                                    // Firefox Stable has a bug: width and height are not immediately available after a playing
-                                    setTimeout(function() {
-                                        let width = $("#remotevideo"+remoteFeed.rfindex).get(0).videoWidth;
-                                        let height = $("#remotevideo"+remoteFeed.rfindex).get(0).videoHeight;
-                                        $('#curres'+remoteFeed.rfindex).removeClass('hide').text(width+'x'+height).show();
-                                    }, 2000);
-                                }
-                            });
-                        }
-                        Janus.attachMediaStream($('#remotevideo'+remoteFeed.rfindex).get(0), stream);
-                        let videoTracks = stream.getVideoTracks();
-
-                        if(!videoTracks || videoTracks.length === 0) {
-                            // No remote video
-                            $('#remotevideo'+remoteFeed.rfindex).hide();
-                            if($('#videoremote'+remoteFeed.rfindex + ' .no-video-container').length === 0) {
-                                $('#videoremote'+remoteFeed.rfindex).append(
-                                    '<img src="' + offline + '" id="img1" class="card-media-image" style="width:300px;height:250px"></img>');
-                            }
-                        } else {
-                            $('#videoremote'+remoteFeed.rfindex+ ' .no-video-container').remove();
-                            $('#remotevideo'+remoteFeed.rfindex).removeClass('hide').show();
-                        }
-                    },
-                    oncleanup: function() {
-                        Janus.log(" ::: Got a cleanup notification (remote feed " + id + ") :::");
-                        if(remoteFeed.spinner)
-                            remoteFeed.spinner.stop();
-                        $('#remotevideo'+remoteFeed.rfindex).remove();
-                        $('#videoremote'+remoteFeed.rfindex).append('<img src="' + offline + '" id="img1" class="card-media-image" style="width:300px;height:250px"></img>');
-                    }
-                });
-        }
-
-        // Initialize the library (all console debuggers enabled)
-        Janus.init({debug: "all", callback: function() {
-                // Make sure the browser supports WebRTC
-                // Create session
-                janusRoom = new Janus(
-                    {
-                        server: server,
-                        success: function() {
-                            // Attach to VideoRoom plugin
-                            janusRoom.attach(
-                                {
-                                    plugin: "janus.plugin.videoroom",
-                                    opaqueId: opaqueId,
-                                    success: function (pluginHandle) {
-                                        vroomHandle = pluginHandle;
-                                        Janus.log("Plugin attached! (" + vroomHandle.getPlugin() + ", id=" + vroomHandle.getId() + ")");
-                                        Janus.log("  -- This is a publisher/manager");
-                                        // Prepare the username registration
-                                        let reg = Janus.randomString(12);
-                                        const register = { "request": "join", "room": myroom, "ptype": "publisher", "display": reg };
-                                        myusername = reg;
-                                        vroomHandle.send({ "message": register });
-                                    },
-                                    error: function (error) {
-                                        Janus.error("  -- Error attaching plugin...", error);
-                                    },
-                                    consentDialog: function (on) {
-                                        Janus.debug("Consent dialog should be " + (on ? "on" : "off") + " now");
-                                    },
-                                    mediaState: function (medium, on) {
-                                        Janus.log("Janus " + (on ? "started" : "stopped") + " receiving our " + medium);
-                                    },
-                                    webrtcState: function (on) {
-                                        Janus.log("Janus says our WebRTC PeerConnection is " + (on ? "up" : "down") + " now");
-                                    },
-                                    onmessage: function (msg, jsep) {
-                                        Janus.debug(" ::: Got a message (publisher) :::");
-                                        Janus.debug(msg);
-                                        let event = msg["videoroom"];
-                                        Janus.debug("Event: " + event);
-                                        if (event != undefined && event != null) {
-                                            if (event === "joined") {
-                                                // Publisher/manager created, negotiate WebRTC and attach to existing feeds, if any
-                                                myid = msg["id"];
-                                                mypvtid = msg["private_id"];
-                                                console.log("Successfully joined room " + msg["room"] + " with ID " + myid);
-                                                publishOwnFeed(true);
-                                                // Any new feed to attach to?
-                                                if (msg["publishers"] !== undefined && msg["publishers"] !== null) {
-                                                    let list = msg["publishers"];
-                                                    console.log("Got a list of available publishers/feeds:");
-                                                    console.log(list);
-                                                    for (let f in list) {
-                                                        let id = list[f]["id"];
-                                                        let display = list[f]["display"];
-                                                        let audio = list[f]["audio_codec"];
-                                                        let video = list[f]["video_codec"];
-                                                        console.log("  >> [" + id + "] " + display + " (audio: " + audio + ", video: " + video + ")");
-                                                    }
-                                                }
-                                            } else if (event === "destroyed") {
-                                                // The room has been destroyed
-                                                Janus.warn("The room has been destroyed!");
-                                                console.error("The room has been destroyed");
-                                            } else if (event === "event") {
-                                                // Any new feed to attach to?
-                                                if (msg["publishers"] !== undefined && msg["publishers"] !== null) {
-                                                    console.log('new publishers!')
-                                                    let list = msg["publishers"];
-                                                    for(let f in list) {
-                                                        let id = list[f]["id"];
-                                                        let display = list[f]["display"];
-                                                        let audio = list[f]["audio_codec"];
-                                                        let video = list[f]["video_codec"];
-                                                        console.log("  >> [" + id + "] " + display + " (audio: " + audio + ", video: " + video + ")");
-                                                        newRemoteFeed(id, display, audio, video);
-                                                    }
-                                                } else if (msg["leaving"] !== undefined && msg["leaving"] !== null) {
-                                                    // One of the publishers has gone away?
-                                                } else if (msg["unpublished"] !== undefined && msg["unpublished"] !== null) {
-                                                    // One of the publishers has unpublished?
-                                                    if (msg["unpublished"] === 'ok') {
-                                                        vroomHandle.hangup();
-                                                        return;
-                                                    }
-                                                } else if (msg["error"] !== undefined && msg["error"] !== null) {
-                                                    if (msg["error_code"] === 426) {
-                                                        // This is a "no such room" error: give a more meaningful description
-                                                    } else {
-                                                        alert(msg["error"]);
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        if (jsep !== undefined && jsep !== null) {
-                                            Janus.debug("Got room event. Handling SDP as well...");
-                                            Janus.debug(jsep);
-                                            vroomHandle.handleRemoteJsep({jsep: jsep});
-                                            // Check if any of the media we wanted to publish has
-                                            // been rejected (e.g., wrong or unsupported codec)
-                                            let audio = msg["audio_codec"];
-                                            if (mystream && mystream.getAudioTracks() && mystream.getAudioTracks().length > 0 && !audio) {
-                                                // Audio has been rejected
-                                                alert("Our audio stream has been rejected, viewers won't hear us");
-                                            }
-                                            let video = msg["video_codec"];
-                                            if (mystream && mystream.getVideoTracks() && mystream.getVideoTracks().length > 0 && !video) {
-                                                // Video has been rejected
-                                                alert("Our video stream has been rejected, viewers won't see us");
-                                                // Hide the webcam video
-                                                $('#myvideo').hide();
-                                                $('#videolocal').append(
-                                                    '<div class="no-video-container">' +
-                                                    '<i class="fa fa-video-camera fa-5 no-video-icon" style="height: 100%;"></i>' +
-                                                    '<span class="no-video-text" style="font-size: 16px;">Video rejected, no webcam</span>' +
-                                                    '</div>');
-                                            }
-                                        }
-                                    },
-                                    onlocalstream: function(stream) {
-                                        console.log(" ::: Got a local stream :::", stream);
-                                        mystream = stream;
-                                        const video = document.querySelector('video#localvideo');
-                                        const videoTracks = stream.getVideoTracks();
-                                        console.log(`Using video device: ${videoTracks[0].label}`);
-                                        video.srcObject = stream;
-                                    },
-                                    // onremotestream: function(stream) {
-                                    // 	// The publisher stream is sendonly, we don't expect anything here
-                                    // },
-                                    oncleanup: function () {
-                                        Janus.log(" ::: Got a cleanup notification: we are unpublished now :::");
-                                        mystream = null;
-                                    }
-                                });
-                        },
-                        error: function(error) {
-                            Janus.error(error);
-                            alert(error);
-
-                        },
-                        destroyed: function() {
-                            console.log('destroyed');
-                        }
+                // Can we attach to any existing feeds?
+                let publishers = msg['publishers'];
+                if (publishers) {
+                    console.log(`RECEIVED a list of ${publishers.length} active publishers in the room:`);
+                    publishers.forEach(publisher => {
+                        // Attach to the feeds
+                        let id = publisher['id'];
+                        let displayName = publisher['display'];
+                        let audio = publisher['audio_codec'];
+                        let video = publisher['video_codec'];
+                        console.log(`Id: ${id} username: ${displayName} audiocodec: ${audio} videocodec: ${video}`);   
+                        this.newRemoteFeed(id, displayName, audio, video);
                     });
-            }});
-    };
+                }
+            } else if(event === 'destroyed') {
+                console.error("The room has been destroyed");
+            } else if (event === 'event') {
+                if (msg["publishers"]) {
+                    // Attach to new feed(s)
+                    console.log('New publishers!')
+                    let publishers = msg["publishers"];
+                    publishers.forEach(publisher => {
+                        // Attach to the feeds
+                        let id = publisher['id'];
+                        let displayName = publisher['display'];
+                        let audio = publisher['audio_codec'];
+                        let video = publisher['video_codec'];
+                        console.log(`Id: ${id} username: ${displayName} audiocodec: ${audio} videocodec: ${video}`);   
+                        this.newRemoteFeed(id, displayName, audio, video);
+                    });
+                } else if(msg['leaving']) {
+                    // One of the publishers is leaving
+                    console.log('A publisher is leaving!');
+                } else if (msg['unpublished']) {
+                    // One of the publishers has unpublished
+                    let leftPublisher = msg['unpublished'];
+                    console.log(`Publisher left: ${leftPublisher}`);
+                }
+            }
+        }
+        if (jsep) {
+            // --- STEP 5 --- 
+            // Janus sent us an SDP answer for our publish request
+            // begin sending local audio and video
+            vrHandle.handleRemoteJsep({jsep});
+            // Check if any media we wanted to publish has been rejected
+            let audio = msg["audio_codec"];
+            let myStream = this.state.myStream;
+            if (myStream && myStream.getAudioTracks() && myStream.getAudioTracks().length > 0 && !audio) {
+                // Audio has been rejected
+                alert("Our audio stream has been rejected, viewers won't hear us");
+                console.error('Our audio stream has been rejected!');
+            }
+            let video = msg['video_codec'];
+            if (myStream && myStream.getVideoTracks() && myStream.getVideoTracks().length > 0 && !video) {
+                // Video has been rejected
+                alert("Our video stream has been rejected, viewers won't see us");
+                console.error('Our video stream has been rejected!');
+            }
+        }
+    }
 
+    // Called when local media stream is available for display
+    // this is ONLY used in the publishing handle
+    onLocalStream(stream) {
+        console.log('ACQUIRED local stream');
+        // Update the UI
+        this.setState({myStream: stream});
+    }
+
+    // Called when the rtc connection was closed with Janus
+    // (but handle is still active)
+    onCleanUp() {
+        console.log('RTC connection closed with Janus');
+        this.setState({myStream: null});
+    }
+
+    // Generic error handler for several points
+    // here it is only used for the publishing handle
+    onError(err) {
+        console.error(err);
+    }
+
+    // Called when the janus connection has been destroyed
+    onJanusDestroyed() {
+        console.log('Janus has been destroyed');
+    }
+
+    // Attach and create a new handle for a remote stream
+    // NOTE: contains custom callbacks, used for each new remote stream
+    // also note that there is one less step here bc we are reusing the 
+    // connection already created above
+    newRemoteFeed(id, display, audiocodec, videocodec) {
+        // Attach to the videoroom plugin to get subscriber handle
+        let remoteFeed = null;
+        // --- Subscriber step 1 ---
+        janus.attach({
+            plugin: 'janus.plugin.videoroom',
+            opaqueId,
+            success: subHandle => {
+                // --- Subscriber step 2 ---
+                remoteFeed = subHandle;
+                console.log('--- NEW SUBSCRIBE HANDLE ---');
+                console.log(`Attached to ${remoteFeed.getPlugin()} | feedid=${id}`);
+                console.log('--- NEW SUBSCRIBE HANDLE ---');
+                // Join the correct room and sub to the feed; initiate RTC negotations
+                let subRequest = {
+                    request: 'join',
+                    room: parseInt(this.props.roomid),
+                    ptype: 'subscriber',
+                    feed: id,
+                    private_id: mypvtid
+                };
+                remoteFeed.videoCodec = videocodec;
+                remoteFeed.audioCodec = audiocodec;
+                remoteFeed.send({message: subRequest});
+            },
+            error: (err) => {
+                console.error('Could not attach subscriber handle:', err);
+            },
+            onmessage: (msg, jsep) => {
+                let event = msg['videoroom'];
+                if (event) {
+                    if (event === 'attached') {
+                        console.log(`Subscriber ${id} created and attached!`);
+                        // Subscriber attached, we have received a list of streams from the publisher
+                    }
+                } 
+                if (jsep) {
+                    // --- Subscriber step 3 ---
+                    // Janus has sent us a subscriber SDP offer (compared to answer, which we got when trying to publish)
+                    remoteFeed.createAnswer({
+                        jsep,
+                        media: { audioSend: false, videoSend: false }, // We only want to receive audio / video 
+                        success: jsep => {
+                            // Answer with jsep, and request for the stream to start
+                            console.log(`SDP received for subscriber ${id}`);
+                            let body = { request: 'start', room: this.props.roomid };
+                            remoteFeed.send({message: body, jsep});
+                        },
+                        error: err => {
+                            console.error('Could not establish subscriber connection:', err);
+                        }
+                    })
+                }
+            },
+            onremotestream: (stream) => {
+                // --- Subscriber step 4 ---
+                const videoTrack = stream.getVideoTracks();
+                const audioTrack = stream.getAudioTracks();
+                if (!videoTrack || videoTrack.length == 0) console.error('No video tracks for sub:', id);
+                if (!audioTrack || audioTrack.length == 0) console.error('No audio tracks for sub:', id);
+
+                // We have received the stream requested, catalog it and do UI housekeeping
+                if (this.state.remoteStreamObjs.filter(o => o.id == id).length != 0) return;
+                const newObj = {id, display, stream};
+                let concat = this.state.remoteStreamObjs.concat(newObj);
+                this.setState({remoteStreamObjs: concat});
+            },
+            oncleanup: () => {
+                // The rtc sub connection has been closed
+                console.log(`Subscription connection closed! id: ${id}, display: ${display}`);
+                const newList = this.state.remoteStreamObjs.filter(o => o.id != id);
+                this.setState({remoteStreamObjs: newList});
+            }
+        });
+    }
+    
     render() {
+        // Setup local video feed
+        const localVideo = document.getElementById('localvideo');
+        if (localVideo) localVideo.srcObject = this.state.myStream;
         return (
             <div className="App">
                 <header className="App-header">
-                    <p>
-                        Welcome to <code>Reunitus</code> video room (powered by Janus)
-                    </p>
+                    <h1>Room: {this.props.roomid} | {this.props.username}</h1>
                     <div>
                         <div id="myvideo" className="container shorter">
                             <video id="localvideo" className="rounded centered" width="100%" height="100%" autoPlay playsInline muted="muted"></video>
                         </div>
-                        {/*<div className="panel-body" id="videolocal"></div>*/}
                     </div>
                 </header>
                 <h3 id="title"></h3>
                 <Container>
-                    <Row>
-                        <Col>
-                            <div id="videoremote1" className="container">
-                                <img src={offline} id="img1" className="card-media-image" style={{ width: "300px", height: "250px" }}></img>
-                            </div>
-                            <h3 id="callername">{'Participant 1'}</h3>
-                        </Col>
-                        <Col>
-                            <div id="videoremote2" className="container">
-                                <img src={offline} id="img1" className="card-media-image" style={{ width: "300px", height: "250px" }}></img>
-                            </div>
-                            <h3 id="callername">{'Participant 2'}</h3>
-                        </Col>
-                        <Col>
-                            <div id="videoremote3" className="container">
-                                <img src={offline} id="img1" className="card-media-image" style={{ width: "300px", height: "250px" }}></img>
-                            </div>
-                            <h3 id="callername">{'Participant 3'}</h3>
-                        </Col>
-                    </Row>
+                    {this.state.remoteStreamObjs.map((v, i) => <RemoteFeed key={i} {...v} />)}
                 </Container>
             </div>
         );

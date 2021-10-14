@@ -1,10 +1,14 @@
 # Reunitus videoroom React App Hack
 
+## Note
+
+This branch's react app contains custom code written while using Reunitus as a guide. 
+
+**What follows is information on the original project, Reunitus**
+
 This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
 
 This is just a VERY quick prototype of a video room using React and Janus Media Server.
-
-![Example Image](https://raw.githubusercontent.com/agonza1/reunitus/main/reunitus_example.jpg)
 
 **Important Note:**
 It has been directly merged reusing most of the code from the Janus video room [demo](https://github.com/meetecho/janus-gateway/blob/master/html/videoroomtest.js), including jQuery!

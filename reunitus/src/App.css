@@ -22,6 +22,11 @@
   justify-content: center;
   font-size: calc(10px + 2vmin);
   color: white;
+  padding-bottom: 20px;
+}
+
+.App-lower {
+  margin-top: 20px;
 }
 
 .shorter {

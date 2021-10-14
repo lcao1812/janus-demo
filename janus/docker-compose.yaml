@@ -1,13 +1,23 @@
+# https://github.com/canyanio/janus-gateway-docker
+
+version: '2.1'
 services:
-  janus:
-    build: 
-      context: .
+
+  #
+  # janus-gateway
+  #
+  janus-gateway:
+    image: 'canyan/janus-gateway:0.10.7'
+    command: ["/usr/local/bin/janus", "-F", "/usr/local/etc/janus"]
     ports:
+      - "8188:8188"
       - "8088:8088"
       - "8089:8089"
-      - "7088:7088"
-      - "7089:7089"
-      - "8188:8188"
       - "8889:8889"
       - "8000:8000"
-      - "10000-10300:10000-10300/udp"
+      - "7088:7088"
+      - "7089:7089"
+    # volumes:
+      # - "./etc/janus/janus.jcfg:/usr/local/etc/janus/janus.jcfg"
+      # - "./etc/janus/janus.eventhandler.sampleevh.jcfg:/usr/local/etc/janus/janus.eventhandler.sampleevh.jcfg"
+    restart: always
