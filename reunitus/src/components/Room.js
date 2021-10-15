@@ -293,12 +293,14 @@ class Room extends React.Component {
                 if (this.state.remoteStreamObjs.filter(o => o.id == id).length != 0) return;
                 const newObj = {id, display, stream};
                 let concat = this.state.remoteStreamObjs.concat(newObj);
+                console.log('new state list', concat);
                 this.setState({remoteStreamObjs: concat});
             },
             oncleanup: () => {
                 // The rtc sub connection has been closed
                 console.log(`Subscription connection closed! id: ${id}, display: ${display}`);
                 const newList = this.state.remoteStreamObjs.filter(o => o.id != id);
+                console.log('new state list', newList);
                 this.setState({remoteStreamObjs: newList});
             }
         });
@@ -320,7 +322,7 @@ class Room extends React.Component {
                 </header>
                 <h3 id="title"></h3>
                 <Container>
-                    {this.state.remoteStreamObjs.map((v, i) => <RemoteFeed key={i} {...v} />)}
+                    {this.state.remoteStreamObjs.map(v => <RemoteFeed key={v.id} {...v} />)}
                 </Container>
             </div>
         );
