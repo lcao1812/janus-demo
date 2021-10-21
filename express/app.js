@@ -57,7 +57,8 @@ app.post('/create-room/:roomID', async function (req, res, next) {
 				transaction: Janus.randomString(),
 				body: {
 					request: 'create',
-					room: roomID
+					room: roomID,
+					publishers: 20
 				}
 			})
 		});
